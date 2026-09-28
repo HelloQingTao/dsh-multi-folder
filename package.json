@@ -1,6 +1,6 @@
 {
   "name": "dsh-multi-folder",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "DeepSeek Harness plugin: secondary working directories for a project. The agent keeps the primary workspace as cwd, gains equal write/exec permissions on configured secondary directories under workspace-write mode, and is notified of configuration changes at the next message boundary. Configurable from the session header AND from the session-creation page (before the first message) through a sessionless multiFolder remote API.",
   "keywords": [
     "dsh-plugin",
@@ -14,12 +14,12 @@
   "author": "Yutong Zou <yutong.zou.24@alumni.ucl.ac.uk> (https://github.com/AngelosZou)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AngelosZou/dsh-multi-folder.git"
+    "url": "git+https://github.com/HelloQingTao/dsh-multi-folder.git"
   },
   "bugs": {
-    "url": "https://github.com/AngelosZou/dsh-multi-folder/issues"
+    "url": "https://github.com/HelloQingTao/dsh-multi-folder/issues"
   },
-  "homepage": "https://github.com/AngelosZou/dsh-multi-folder#readme",
+  "homepage": "https://github.com/HelloQingTao/dsh-multi-folder#readme",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
