@@ -16,6 +16,16 @@
 | Other windows / hand edits | Config lives in a host-owned store and reads are version-checked against the file, so a change made in another window — or by editing the JSON directly — is picked up on the **next read, no restart** |
 | Writing files / running commands | `write` / `edit` / `pwsh` / `bash` landing in a secondary directory are re-rooted to it automatically; every sandbox mode keeps its semantics. `read` / `glob` / `grep` are unrestricted anyway |
 
+## Showcases
+
+**The "+" menu entry** — a `Multi-folder` row inside the composer's own menu, with a localized label, a folder glyph and a one-line description:
+
+<img src="docs/images/plus-menu-entry.png" alt="Multi-folder row inside the composer + menu, above the input" width="720">
+
+**`@` references** — the configured secondary directories listed under their own group while typing `@`:
+
+<img src="docs/images/at-mention-secondary-dirs.png" alt="Secondary working directories listed under a Multi-folder group in the @ picker" width="360">
+
 Slash command (same capability, also what the agent sees):
 
 ```
