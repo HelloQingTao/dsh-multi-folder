@@ -76,6 +76,10 @@ dsh plugin --profile web add file:D:/projects/dsh-multi-folder
 - **配置与安全边界**：per-workspace 配置为 JSON 数组，存于**所有 Agent 沙箱之外**的宿主目录 `<DSH_HOME>/storages/multi-folder/<workspace-key>.json`；对它的直接 `write`/`edit` 一律显式拒绝——**Agent 无法自我授权，配置权只属于用户**。缓存以 `fs.stat` 的版本保持一致：仅当文件仍是"当初读取时那个版本"才复用，否则回盘（版本在读**之前**取戳，避免把较旧内容标成较新版本）；每次读取都做规范化去重。详见 [SECURITY.md](SECURITY.md)。
 - **无会话远程 API**：`multiFolder` 命名空间经 `ctx.typert.register` 以手写 `src-json` 描述符注册，并提供同名普通对象服务；`list`/`add`/`remove`/`set`/`listFiles` 以工作区**路径**为键，与命令共享同一套校验核心，因此首个消息之前的新会话界面也能直接配置。
 
+## 已知问题
+
+**在旧会话里点「+」，指令分组可能为空**（新建会话正常）：先看看是否有仍在运行的任务（`job_list`，必要时 `job_kill`），然后重启 DSH，或直接新开会话即可恢复。
+
 ## 开发与文档
 
 - 测试：`node test/smoke-host.mjs`（宿主 apply + remote API + 缓存一致性 + `listFiles`）、`node test/intercept.mjs`（拦截/命令/通知）

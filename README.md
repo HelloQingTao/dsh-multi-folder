@@ -76,6 +76,10 @@ Install this package and the upstream `dsh-multi-folder` **one at a time**: they
 - **Configuration and security boundary** — per-workspace config is a JSON array in a host-owned store **outside every agent sandbox root** (`<DSH_HOME>/storages/multi-folder/<workspace-key>.json`); direct `write`/`edit` attempts against it are rejected with an explicit message — **the agent can never self-grant a directory; configuration is user-managed by design**. The in-process cache is kept honest with `fs.stat`: a cached copy is reused only while the file still reports the version it was read at (stamped *before* the read, so a racing write can't leave older content cached under a newer stamp); every read normalizes and de-duplicates. See [SECURITY.md](SECURITY.md).
 - **Sessionless remote API** — the `multiFolder` namespace is registered through `ctx.typert.register` with hand-written `src-json` descriptors and provided as a plain-object service. `list` / `add` / `remove` / `set` / `listFiles` are keyed by workspace **path** and share one validated core with the command, so the new-session screen can configure directories before any session exists.
 
+## Known issues
+
+**The Commands group can come up empty when "+" is opened in an older session** (a fresh session works): check for still-running jobs (`job_list`, `job_kill` if needed), then restart DSH — or just open a new session.
+
 ## Development & docs
 
 - Tests: `node test/smoke-host.mjs` (host apply + remote API + cache coherence + `listFiles`), `node test/intercept.mjs` (interception / command / notification)
