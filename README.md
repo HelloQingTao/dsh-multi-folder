@@ -28,16 +28,17 @@ Slash command (same capability, also what the agent sees):
 ## Install
 
 ```bash
-dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
+dsh plugin --profile web add @zfgcta/dsh-multi-folder
 ```
 
-A local clone works too (use forward slashes in the path):
+Where GitHub is hard to reach from, the npm registry route above is the one to use; a git or local source also works:
 
 ```bash
-dsh plugin --profile web add file:D:/projects/dsh-multi-folder
+dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
+dsh plugin --profile web add file:D:/projects/dsh-multi-folder   # local clone, forward slashes
 ```
 
-Afterwards **restart the DSH backend** (host plugins are composed at process start) and **refresh the browser page** (the client bundle is served fresh). Remove with `dsh plugin --profile web remove dsh-multi-folder`.
+Afterwards **restart the DSH backend** (host plugins are composed at process start) and **refresh the browser page** (the client bundle is served fresh). Remove with `dsh plugin --profile web remove @zfgcta/dsh-multi-folder`.
 
 ## Requirements
 
@@ -53,6 +54,8 @@ Afterwards **restart the DSH backend** (host plugins are composed at process sta
 | 0.1.6 and earlier | ❌ Not supported |
 
 The "+"-menu picker and `@` references build on the `commandUi` / `inputTriggers` client services shipped from 0.1.7; on older hosts those services are absent — the plugin skips just those registrations instead of erroring, but the two features are unavailable.
+
+Install this package and the upstream `dsh-multi-folder` **one at a time**: they claim the same runtime namespace, so having both in a profile breaks one of them. Uninstall the other first (`dsh plugin --profile web remove <package>`).
 
 ## How it works
 

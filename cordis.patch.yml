@@ -1,8 +1,11 @@
-# dsh-multi-folder bundle patch.
+# @zfgcta/dsh-multi-folder bundle patch (a maintained fork of
+# dsh-multi-folder).
 #
 # Applied as a profile patch layer after every in-box bundle. Inserts the
 # plugin row at the profile root; later layers (or the user's own
-# cordis.patch.yml) can address it by id with the last write winning.
+# cordis.patch.yml) can address it by id with the last write winning. The row
+# id deliberately keeps the historical `dsh-multi-folder` name so existing
+# per-workspace configuration and user patches continue to address it.
 - insert:
     - id: dsh-multi-folder
-      name: 'dsh-multi-folder'
+      name: '@zfgcta/dsh-multi-folder'

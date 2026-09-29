@@ -28,16 +28,17 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
+dsh plugin --profile web add @zfgcta/dsh-multi-folder
 ```
 
-本地已 clone 的仓库也可以（路径用正斜杠）：
+GitHub 访问不稳定时，上面的 npm registry 方式正是省事的那条路；也可从 git 或本地 clone 安装（路径用正斜杠）：
 
 ```bash
+dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
 dsh plugin --profile web add file:D:/projects/dsh-multi-folder
 ```
 
-安装后需**重启 DSH 后端**（宿主插件在进程启动时装载）**并刷新浏览器页面**（客户端 bundle 即时提供）。卸载：`dsh plugin --profile web remove dsh-multi-folder`。
+安装后需**重启 DSH 后端**（宿主插件在进程启动时装载）**并刷新浏览器页面**（客户端 bundle 即时提供）。卸载：`dsh plugin --profile web remove @zfgcta/dsh-multi-folder`。
 
 ## 要求
 
@@ -53,6 +54,8 @@ dsh plugin --profile web add file:D:/projects/dsh-multi-folder
 | 0.1.6 及更早 | ❌ 不支持 |
 
 「+」菜单弹层与 `@` 引用依赖 0.1.7 起随宿主提供的 `commandUi` / `inputTriggers` 客户端服务；在更早版本上，宿主不会提供这两个服务，本插件不会报错，但这两项功能无法使用。
+
+本包与同名包 `dsh-multi-folder` **只能装一个**：两者占用同一套运行时标识（`/multi-folder` 命令、`multiFolder` 服务与 `multi-folder` 词条命名空间、副目录配置目录），同时安装会导致其中一个装载失败。请先卸载另一个。
 
 ## 原理
 
