@@ -2,6 +2,57 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] — 2026-09-28
+
+### Added
+
+- **`@` references reach into the secondary directories.** A dedicated `@`-trigger
+  source (registered through `ctx.inputTriggers.registerSource` under its own
+  name, so it coexists with the shipped file/session source) asks the new host
+  endpoint `multiFolder/listFiles` for the entries of every configured directory
+  and merges them as absolute paths under a `多工作区目录 / Multi-folder` group.
+  A failure in the source degrades to an empty group and never affects the
+  shipped results; merged candidates are capped at 30.
+- **`+`-menu entry opening the official option picker.** The shipped composer "+"
+  menu's Commands group already lists the host-registered `/multi-folder`
+  command; `ctx.commandUi.decorate` now hangs a `popupSelect` spec on it, so
+  picking the row opens the shell's own picker (the surface behind `model`):
+  an "Add working directory" row that runs the native directory picker, and one
+  row per configured directory that removes behind the shell's risk confirmation.
+  Inside a real session the picker submits `/multi-folder …` (so the agent is
+  notified); on the new-session screen it uses the sessionless `multiFolder/*`
+  endpoints.
+- **Cross-window config coherence.** `loadDirs` serves the in-process cache only
+  while `fs.stat` still reports the exact version it was read at (stamped before
+  the read, so a racing write can never leave older content cached under a
+  newer stamp), so directories added by another window or session — or by a
+  direct edit of the JSON file — are recognized on the next read instead of
+  surviving until restart. `saveDirs` adopts its own write.
+
+### Fixed
+
+- **The entry vanished whenever the draft was non-empty.** The shipped Commands
+  group hides rows that declare an input hint unless the draft is empty
+  (`position === 'leading'`), so `/multi-folder` registered without
+  `input.hint`; the command handler still parses `rawInput`, so
+  `/multi-folder add <path>` keeps working typed by hand.
+- **Duplicate adds.** Normalization plus de-duplication on every read collapse
+  the same directory spelled in different slash/case styles into one entry, and
+  a repeat pick now reports that it was kept as a single entry instead of
+  appearing to do nothing.
+
+### Changed
+
+- Single entry point: the session-header button, the session-creation dock chip,
+  the hero chip, and the fallback launcher are gone; the `+` menu is the only
+  UI the plugin adds, and its remaining visual code is a cosmetic pass giving
+  the row a folder glyph and a localized label.
+- `README.md` / `README.zh.md` rewritten for the `+`-menu and `@`-reference
+  flows, the cross-window config behavior, and the fork provenance. The npm
+  badge and the bare-name install command are dropped: this fork is not
+  published to npm, so installs must name the git source (a bare
+  `dsh-multi-folder` resolves to the upstream package on the registry).
+
 ## [0.2.4] — 2026-09-19
 
 ### Fixed
