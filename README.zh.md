@@ -27,22 +27,17 @@
 
 ## 安装
 
-`dsh plugin` 会把参数**原样转发给 pnpm**（在 profile 目录内执行）。因此：
-
-- ⚠️ 裸包名 `dsh-multi-folder` 会命中 npm registry，装到的是**上游原版**（`AngelosZou`，0.2.x），不含本 fork 的功能。本仓库尚未发布到 npm，请**显式指定源**：
-
 ```bash
-# 从本 fork 的 GitHub 仓库安装（推荐）
 dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
-
-# 或从本地已 clone 的仓库安装（开发调试用；路径用正斜杠）
-dsh plugin --profile web add file:D:/projects/dsh-multi-folder
-
-# 卸载
-dsh plugin --profile web remove dsh-multi-folder
 ```
 
-安装后需**重启 DSH 后端**（宿主插件在进程启动时装载）**并刷新浏览器页面**（客户端 bundle 即时提供）。若 GitHub 直连不稳定，git 需走代理（本 fork 已针对 `github.com` 单独配置，见 Q&A）。
+本地已 clone 的仓库也可以（路径用正斜杠）：
+
+```bash
+dsh plugin --profile web add file:D:/projects/dsh-multi-folder
+```
+
+安装后需**重启 DSH 后端**（宿主插件在进程启动时装载）**并刷新浏览器页面**（客户端 bundle 即时提供）。卸载：`dsh plugin --profile web remove dsh-multi-folder`。
 
 ## 要求
 
@@ -52,13 +47,12 @@ dsh plugin --profile web remove dsh-multi-folder
 
 ## DSH 兼容性
 
-| DeepSeek Harness | 可用范围 |
+| DeepSeek Harness | 支持情况 |
 | --- | --- |
-| 0.1.7 及更新 | 完整功能：「+」菜单弹层、`@` 引用副目录、跨窗口配置一致（已在 0.1.7-rc.2 实测） |
-| 0.1.2-alpha ~ 0.1.6 | 建议用上游 `dsh-multi-folder@0.2.4`：本 fork 依赖 0.1.7 起的 `commandUi` / `inputTriggers` 客户端服务 |
-| 0.1.1 及更早 | 用 `dsh-multi-folder@0.1.7` |
+| **0.1.7 及更新** | ✅ 完全支持：「+」菜单弹层、`@` 引用副目录文件、跨窗口配置一致（已在 0.1.7-rc.2 实测） |
+| 0.1.6 及更早 | ❌ 不支持 |
 
-降级说明：客户端在缺少 `commandUi` 或 `inputTriggers` 时会跳过对应注册，不报错，`/multi-folder` 命令与权限拦截照常可用。
+「+」菜单弹层与 `@` 引用依赖 0.1.7 起随宿主提供的 `commandUi` / `inputTriggers` 客户端服务；在更早版本上，宿主不会提供这两个服务，本插件不会报错，但这两项功能无法使用。
 
 ## 原理
 
@@ -69,14 +63,11 @@ dsh plugin --profile web remove dsh-multi-folder
 - **配置与安全边界**：per-workspace 配置为 JSON 数组，存于**所有 Agent 沙箱之外**的宿主目录 `<DSH_HOME>/storages/multi-folder/<workspace-key>.json`；对它的直接 `write`/`edit` 一律显式拒绝——**Agent 无法自我授权，配置权只属于用户**。缓存以 `fs.stat` 的版本保持一致：仅当文件仍是"当初读取时那个版本"才复用，否则回盘（版本在读**之前**取戳，避免把较旧内容标成较新版本）；每次读取都做规范化去重。详见 [SECURITY.md](SECURITY.md)。
 - **无会话远程 API**：`multiFolder` 命名空间经 `ctx.typert.register` 以手写 `src-json` 描述符注册，并提供同名普通对象服务；`list`/`add`/`remove`/`set`/`listFiles` 以工作区**路径**为键，与命令共享同一套校验核心，因此首个消息之前的新会话界面也能直接配置。
 
-## Q&A
+## 开发与文档
 
-**为什么「+」菜单里看不到这一行？** 若装的是 npm 上的上游版（0.2.x），它没有该入口——请用上一节的 git 源安装并重启。若在 0.1.2~0.1.6 上运行，「指令」分组会把它显示成普通命令行。
+- 测试：`node test/smoke-host.mjs`（宿主 apply + remote API + 缓存一致性 + `listFiles`）、`node test/intercept.mjs`（拦截/命令/通知）
+- 架构与演进：[docs/design.md](docs/design.md)；安全模型：[SECURITY.md](SECURITY.md)；变更：[CHANGELOG.md](CHANGELOG.md)
 
-**能指定 profile / 多个 profile 吗？** 每条命令都是 per-profile 的：换 `--profile <name>` 即装进那个 profile。
+## 许可
 
-**上游会同步吗？** 本仓库是 [AngelosZou/dsh-multi-folder](https://github.com/AngelosZou/dsh-multi-folder)（MIT，原作者署名保留）的持续维护 fork，保留包身份，可用 `git fetch upstream` 合并上游改动。
-
-## 变更与许可
-
-版本变更见 [CHANGELOG.md](CHANGELOG.md)（0.3.0 起为本 fork 的工作）。架构细节见 [docs/design.md](docs/design.md)。许可 [MIT](LICENSE)。
+[MIT](LICENSE)

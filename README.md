@@ -27,22 +27,17 @@ Slash command (same capability, also what the agent sees):
 
 ## Install
 
-`dsh plugin` forwards its arguments **verbatim to pnpm** inside the profile directory, so the package *source* matters:
-
-- ⚠️ A bare package name resolves against the **npm registry** and installs the **upstream original** (`AngelosZou`, 0.2.x) — it does **not** contain this fork's work. This repository is not published to npm yet, so name the source explicitly:
-
 ```bash
-# Install from this fork's GitHub repository (recommended)
 dsh plugin --profile web add git+https://github.com/HelloQingTao/dsh-multi-folder.git
-
-# Or install from a local clone (development; use forward slashes in the path)
-dsh plugin --profile web add file:D:/projects/dsh-multi-folder
-
-# Remove
-dsh plugin --profile web remove dsh-multi-folder
 ```
 
-Afterwards **restart the DSH backend** (host plugins are composed at process start) and **refresh the browser page** (the client bundle is served fresh). If direct GitHub access is unreliable, git needs a proxy — see Q&A.
+A local clone works too (use forward slashes in the path):
+
+```bash
+dsh plugin --profile web add file:D:/projects/dsh-multi-folder
+```
+
+Afterwards **restart the DSH backend** (host plugins are composed at process start) and **refresh the browser page** (the client bundle is served fresh). Remove with `dsh plugin --profile web remove dsh-multi-folder`.
 
 ## Requirements
 
@@ -52,13 +47,12 @@ Afterwards **restart the DSH backend** (host plugins are composed at process sta
 
 ## DSH compatibility
 
-| DeepSeek Harness | What works |
+| DeepSeek Harness | Support |
 | --- | --- |
-| 0.1.7 and later | Full feature set: "+"-menu picker, `@` references into secondary directories, cross-window config coherence (verified on 0.1.7-rc.2) |
-| 0.1.2-alpha – 0.1.6 | Use upstream `dsh-multi-folder@0.2.4` — this fork builds on the `commandUi` / `inputTriggers` client services that ship from 0.1.7 |
-| 0.1.1 and earlier | Use `dsh-multi-folder@0.1.7` |
+| **0.1.7 and later** | ✅ Full support: "+"-menu picker, `@` references into secondary directories, cross-window config coherence (verified on 0.1.7-rc.2) |
+| 0.1.6 and earlier | ❌ Not supported |
 
-Graceful degradation: when `commandUi` or `inputTriggers` is absent, the client skips just that registration instead of erroring, and the `/multi-folder` command plus the permission interception keep working.
+The "+"-menu picker and `@` references build on the `commandUi` / `inputTriggers` client services shipped from 0.1.7; on older hosts those services are absent — the plugin skips just those registrations instead of erroring, but the two features are unavailable.
 
 ## How it works
 
@@ -69,14 +63,11 @@ Graceful degradation: when `commandUi` or `inputTriggers` is absent, the client 
 - **Configuration and security boundary** — per-workspace config is a JSON array in a host-owned store **outside every agent sandbox root** (`<DSH_HOME>/storages/multi-folder/<workspace-key>.json`); direct `write`/`edit` attempts against it are rejected with an explicit message — **the agent can never self-grant a directory; configuration is user-managed by design**. The in-process cache is kept honest with `fs.stat`: a cached copy is reused only while the file still reports the version it was read at (stamped *before* the read, so a racing write can't leave older content cached under a newer stamp); every read normalizes and de-duplicates. See [SECURITY.md](SECURITY.md).
 - **Sessionless remote API** — the `multiFolder` namespace is registered through `ctx.typert.register` with hand-written `src-json` descriptors and provided as a plain-object service. `list` / `add` / `remove` / `set` / `listFiles` are keyed by workspace **path** and share one validated core with the command, so the new-session screen can configure directories before any session exists.
 
-## Q&A
+## Development & docs
 
-**Why don't I see the row in the "+" menu?** If a bare `dsh-multi-folder` install pulled the npm-published upstream version (0.2.x), it has no such entry — install from the git source above and restart. On DSH 0.1.2–0.1.6 it appears as a plain command row instead.
+- Tests: `node test/smoke-host.mjs` (host apply + remote API + cache coherence + `listFiles`), `node test/intercept.mjs` (interception / command / notification)
+- Architecture: [docs/design.md](docs/design.md) · Security model: [SECURITY.md](SECURITY.md) · Changes: [CHANGELOG.md](CHANGELOG.md)
 
-**Can I target another profile?** Every command is per-profile: swap `--profile <name>`.
+## License
 
-**Do you track upstream?** This repository is a maintained **fork** of [AngelosZou/dsh-multi-folder](https://github.com/AngelosZou/dsh-multi-folder) (MIT; original author credit preserved). It keeps the package identity, so `git fetch upstream` merges upstream changes.
-
-## Changes & license
-
-See [CHANGELOG.md](CHANGELOG.md) (0.3.0 onwards is this fork's work) and [docs/design.md](docs/design.md) for the architecture. [MIT](LICENSE).
+[MIT](LICENSE)
