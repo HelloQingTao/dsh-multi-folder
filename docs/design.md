@@ -2,15 +2,20 @@
 
 Architecture and invariants of `dsh-multi-folder`.
 
-> **Version note (0.3.0).** The client entry points described below under
+> **Version note (0.4.0).** The client entry points described below under
 > "hero seat election" — the session-header button, the `conversation.input.dock`
 > chip, the upstream hero chip, and the fixed fallback launcher — were replaced by
 > a single integration with the shell's own surfaces: the `/multi-folder` command
 > row in the composer **"+" menu**, which `ctx.commandUi.decorate` opens as the
 > official `popupSelect` picker, plus an `@`-trigger source for secondary
 > directories. Those sections are kept as design history; for the shipped UI see
-> the "Client: shell surfaces (0.3.0)" section below. The host half (interception,
-> prompt injection, notifications, config store, remote API) is unchanged.
+> the "Client: shell surfaces" section below. 0.4.0 adds one self-drawn surface
+> (the directory browser behind "Add", used when no native picker can answer),
+> makes the `@` source drill into subdirectories with Tab, and fixes two host-side
+> faults: optional services listed in `exports.inject` (a hard activation gate that
+> switched the whole plugin off), and a notice `source.kind` session format v4
+> rejects. The host half's permissions model, config store and interception are
+> unchanged.
 
 ## Goal
 
@@ -147,7 +152,7 @@ opens its own **sessionless** endpoints on the shared `/api` RPC channel:
   `ctx.inject(['typert'], (t) => t.typert.register(REMOTE_CONTRIBUTION))` —
   the sanctioned manual path documented by `dsh-typert-loader` ("Manual
   `ctx.typert.register()` remains available for contributions that do not use
-  a `./typert` artifact"). All five descriptors use `src-json` codecs (no zod
+  a `./typert` artifact"). All seven descriptors use `src-json` codecs (no zod
   schemas needed) with `invocation: { kind: 'direct' }`:
 
   | Endpoint | Parameters (wire) | Result |
@@ -156,13 +161,27 @@ opens its own **sessionless** endpoints on the shared `/api` RPC channel:
   | `multiFolder/add` | `workspace`, `path` | `{ workspace, dirs, changed }` (plus a `note` when the path was already configured) |
   | `multiFolder/remove` | `workspace`, `path` | `{ workspace, dirs, changed }` |
   | `multiFolder/set` | `workspace`, `dirs` | `{ workspace, dirs, changed }` |
-  | `multiFolder/listFiles` | `dir`, `query` | `[{ path, kind }]` — direct children of one directory, `path` absolute with POSIX slashes, `query` matched against the last path segment (case-insensitive `includes`) |
+  | `multiFolder/listFiles` | `workspace`, `dir`, `query` | `[{ path, kind }]` — direct children of one directory, directories first, `path` absolute with POSIX slashes, `query` matched against the last path segment (case-insensitive `includes`) |
+  | `multiFolder/browse` | `path` | `{ path, parent, home, entries, truncated }` — child **directories** of one level, for the owned browser |
+  | `multiFolder/makeDir` | `parent`, `name` | `{ path, parent }` — one validated child segment created with `mkdir` |
 
   `listFiles` exists for the `@`-reference source: it enumerates the direct
   children of a directory through `fs.resolve` + `fs.listDir`, keeping the
   read-only "list the entries" surface separate from the config-management
-  methods (it takes no workspace argument, and `fs.listDir` never reads file
-  contents).
+  methods (`fs.listDir` never reads file contents). It is **fenced**: the target
+  must lie inside one of `workspace`'s configured secondary roots, or the result
+  is empty — the endpoint cannot be walked into a general path enumerator.
+
+  `browse` / `makeDir` serve only the plugin's own directory browser and are
+  keyed by **path**, not by workspace: neither reads nor writes the
+  configuration store, and a selection still commits through the mode's own
+  channel (`/multi-folder add` in a session, `multiFolder/add` before one).
+  Listing rides the `fs` seam — which every host composition provides, unlike
+  `uiWorkspace.pickDirectory()` — returns directories only, flags dot-prefixed
+  entries as `hidden`, caps one level at 1000 with `truncated`, and requires a
+  fully qualified path. `makeDir` mirrors the shipped browse backend
+  (`dsh-host-directory-picker-browse`) by calling Node's `mkdir` on one
+  validated segment, non-recursive on purpose.
 
   The workspace argument is a **path**, not a session id; the client derives
   it from the workspaces store (`WorkspaceView.path`). Business errors throw
@@ -194,6 +213,17 @@ opens its own **sessionless** endpoints on the shared `/api` RPC channel:
   - the next boundary consumes it — `agent/pre-step` prepends it to the entering
     message batch, or `tools/post-execute` attaches it as `additionalContexts` —
     whichever fires first. No turn is ever interrupted.
+  - the notice's `source` declares a **producer-owned kind**
+    (`kind: 'plugin:dsh-multi-folder'`, `form: 'notice'`, `summary`). Session
+    format v4 admits only that shape: `encodeCurrentEvent`, which the JSONL writer
+    runs on every appended event, throws `format v4 message requires a
+    producer-owned source kind` for the retired catch-all `kind: 'plugin'`. Failing
+    inside the append path is worse than a dropped notice — it fails the run and
+    can leave the session write handle retained, which later surfaces as
+    `session/writer-held` on `command.list` (observed as: the "+" menu's Commands
+    group comes up empty in an older session, works in a fresh one, and recovers on
+    restart). `plugin:<plugin>` is also the spelling the v3→v4 migration produces
+    for a non-first-party producer, so older logs converge on it.
 
 ## Client
 
@@ -207,13 +237,14 @@ window.__ModuleLoader__.load({
 })
 ```
 
-### Client: shell surfaces (0.3.0, current)
+### Client: shell surfaces (0.3.0 → 0.4.0, current)
 
-From 0.3.0 the plugin adds **no widget of its own**. It integrates with two
-surfaces the shell already renders, so the entry looks native by construction
-(the earlier chips/panels — documented further below as design history — were
-replaced because a hand-drawn popup could never match the shell's own styling,
-and a click-hijack of the menu row proved unreliable):
+From 0.3.0 the plugin adds **no widget of its own**, integrating with surfaces
+the shell already renders so entries look native by construction (the earlier
+chips/panels — documented further below as design history — were replaced
+because a hand-drawn popup could never match the shell's own styling, and a
+click-hijack of the menu row proved unreliable). 0.4.0 adds exactly **one**
+self-drawn surface, the directory browser, for a reason recorded below.
 
 - **"+"-menu row from the host command.** The host already registers
   `/multi-folder` with the human-command registry, which is what feeds the
@@ -227,11 +258,12 @@ and a click-hijack of the menu row proved unreliable):
     spec on that host command, so a pick (or a bare Enter) opens the shell's own
     option picker — the same surface behind `model` — instead of inserting a bare
     command line. The plugin supplies only data:
-    - an "Add working directory" row whose `onSelect` runs `uiWorkspace.pickDirectory()`
-      then submits the add;
+    - an "Add working directory" row whose `onSelect` runs
+      `pickAndAdd(target)` — the native picker when one can answer, otherwise the
+      owned browser (see below);
     - one row per configured directory carrying a `confirmation`
       (`SelectConfirmation`) so removal goes through the shell's tick-to-acknowledge gate.
-    - In a real session the picker submits `/multi-folder …` through the Remote BFF
+    - In a real session the add/remove submits `/multi-folder …` through the Remote BFF
       (so the agent gets the change notice and the run appends to the conversation);
       on the new-session screen it uses the sessionless `multiFolder/*` endpoints,
       keyed by workspace path. `syncAfterCommand` folds the `[MF:JSON]` line the
@@ -244,16 +276,61 @@ and a click-hijack of the menu row proved unreliable):
   gives it a folder glyph and the localized label, borrowing the official icon /
   alias classes. It is purely visual, idempotent (`data-mf-decorated`), never
   throws, and intercepts nothing.
-- **`@` references into secondary directories.** `ctx.inputTriggers.registerSource`
-  adds a second `@`-trigger source (its own `name`, so it coexists with the
-  shipped `reference` source and renders as its own group). Its `candidates` asks
-  the host `multiFolder/listFiles` endpoint per configured directory and returns
-  absolute-path rows so the agent can `read` them directly. The whole body is
-  wrapped in try/catch and capped (30 rows): a failure degrades to an empty group
-  and, per the trigger pipeline's `source-failed` semantics, never affects the
-  shipped primary-workspace results.
+- **`@` references into secondary directories, with Tab drill.**
+  `ctx.inputTriggers.registerSource` adds a second `@`-trigger source (its own
+  `name`, so it coexists with the shipped `reference` source and renders as its
+  own group). Its `candidates` asks the host `multiFolder/listFiles` endpoint and
+  returns absolute-path rows so the agent can `read` them directly. The whole body
+  is wrapped in try/catch and capped (30 rows): a failure degrades to an empty
+  group and, per the trigger pipeline's `source-failed` semantics, never affects
+  the shipped primary-workspace results. From 0.4.0 the source matches the shipped
+  one's drill contract:
+  - directory rows carry `drill: true`, so the pipeline's `tab` action routes them
+    as `{ action: 'drill' }` instead of a commit;
+  - `onPick` answers a drill with `{ text, continue: true }` — the menu stays open
+    and re-queries on the new text — inserting the directory with a trailing slash
+    and, for a spaced path, keeping the quote OPEN (`@"path/`), the exact grammar
+    of the shipped `formatFileMention`;
+  - `header(session, { query, quoted, drilled })` returns the breadcrumb trail
+    (secondary-directory name + each settled level, last one `current`), and a
+    crumb click arrives as another `drill` pick carrying a ready mention;
+  - queries accept the alias form (`@<dir-name>/rest`) and the absolute form a
+    drill inserts, so the chain closes and Tab works repeatedly.
+- **The owned directory browser (0.4.0).** The one surface the plugin draws.
+  `uiWorkspace.pickDirectory()` is native-only: when the host composes the browse
+  backend (a LAN bind, a remote browser client, a desktop shell) it answers
+  `directory-picker/unavailable`, and the shipped in-app browser is reachable only
+  by the shell's own workspace surfaces. Rather than show remote users an error
+  they cannot act on, "Add directory" degrades to a modal browser served by
+  `multiFolder/browse` + `multiFolder/makeDir`, registered on its own
+  `shell.overlay` slot (`id: 'multi-folder-browser'`, above the panel) so it can
+  open without the panel ever having been shown. The native picker still wins
+  wherever it answers, and a picker that *throws* is treated as "cannot answer"
+  rather than as a failure. It commits through the mode's own channel, so it adds
+  no privilege path.
+  - Why not the shipped `popupSelect` for this? That shell is a **one-shot
+    picker**: `open()` runs exactly one `options` fetch, its search box is a pure
+    local filter that never re-queries the provider, and a successful select
+    consumes the token and closes. A level-by-level browse cannot be expressed in
+    it. Its `SelectOption` contract has no per-row button slot either — the whole
+    row is the target — which is also why removals are a separate row behind a
+    `confirmation` rather than an inline "×".
+  - Styling comes only from `--dsw-alias-*` tokens (no raw colour outside a
+    `var(...)` fallback), so it follows the theme and any applied skin; the
+    stylesheet is injected once behind a `data-plugin-css` guard.
+  - A failed commit keeps the browser open and shows the error inside it:
+    `mutate` / `mutateWorkspace` never reject and now return an explicit
+    `{ ok, error }`, because the "+" popup path has no visible panel to surface
+    `store.error` in.
 
-`inject` (0.3.0): `['remote', 'remote.commands', 'slots', 'workspaces', 'uiWorkspace', 'connection', 'sessions', 'locale', 'inputTriggers', 'commandUi']`.
+`inject` (0.4.0): `['remote', 'remote.commands', 'slots', 'workspaces', 'connection', 'sessions', 'locale']`.
+`exports.inject` is a **hard activation gate**: listing a service the profile does
+not compose leaves the whole entry `pending (waiting for service: X)`, which also
+switches off the command and the interception, and can fail `web boot` outright.
+So only always-composed services are listed; the optional three
+(`uiWorkspace`, `inputTriggers`, `commandUi`) resolve lazily via `ctx.get` at use
+time or attach through `ctx.inject`, whose callback simply never fires when the
+shell does not compose the service.
 
 ### Client: earlier surfaces (≤0.2.x, design history)
 
@@ -422,7 +499,10 @@ communication); those UI registrations are no longer made.
   per source) but the trigger order within the `@` menu is a shared space the
   plugin does not control; likewise the Commands group ordering is the shell's.
   Absolute-positioned neighbours in the composer band are no longer a concern
-  because the plugin no longer places a widget there.
+  because the plugin no longer places a widget there — **except** the 0.4.0
+  directory browser, which is a centered fixed-position modal at `zIndex: 700`.
+  It dims the page and dismisses on Esc / backdrop click, so a wrong guess about
+  the stacking order cannot trap the user behind it.
 - The `multiFolder/*` endpoints use hand-written `src-json` Typert descriptors
   registered through `ctx.typert.register`. `src-json` gives JSON-safety
   boundary checks, not schema validation; the shared core performs all
@@ -432,23 +512,46 @@ communication); those UI registrations are no longer made.
 
 ## Tests
 
-`test/smoke-host.mjs` and `test/intercept.mjs` run without the DSH runtime using
-mock services and assert: interception, canonicalization, the config guard, both
-notification channels, notice gating, command flows, and the sessionless remote
-contribution — shape (`add/list/listFiles/remove/set` with `src-json` codecs and
-direct invocations) and behavior (list/add/set/remove, idempotence,
-sanitization, error prefixing, cross-channel cache coherence). The host mocks also
-pin the 0.3.0 config semantics: an unchanged file is served from the cache with
-no re-read, an out-of-process edit is picked up on the next read, duplicate
-spellings collapse to one entry, a repeat add reports a `note`, and `listFiles`
-enumerates a directory (absolute slash paths, kinds preserved, name matching,
-last-segment matching on a drilled query, empty result instead of rejection).
+All five suites below run without the DSH runtime, against mock services.
+
+- `test/smoke-host.mjs` — interception, canonicalization, the config guard, both
+  notification channels, notice gating, command flows, and the sessionless remote
+  contribution: shape (seven `src-json` endpoints with direct invocations) and
+  behavior (list/add/set/remove, idempotence, sanitization, error prefixing,
+  cross-channel cache coherence). It pins the 0.3.0 config semantics (an unchanged
+  file is served from the cache with no re-read, an out-of-process edit is picked up
+  on the next read, duplicate spellings collapse to one entry, a repeat add reports
+  a `note`) and, from 0.4.0, the `listFiles` **fence** (a directory outside every
+  configured root returns nothing while a subdirectory of one stays reachable, with
+  directories sorted first) plus `browse`/`makeDir` against a real temporary
+  directory: directory-only listing, name sort, hidden flags, the fully-qualified
+  path fence, single-segment validation, `EEXIST` surfaced as a clear message, and
+  neither endpoint touching the config store.
+- `test/intercept.mjs` — the tool-pipeline interception and the command /
+  notification paths, including the notice's **producer-owned** `source.kind`
+  (`plugin:dsh-multi-folder`, the value session format v4 admits).
+- `test/activation.mjs` (0.4.0) — applies the client bundle against a minimal shell
+  composing none of `uiWorkspace` / `inputTriggers` / `commandUi`, and a full one:
+  the plugin must activate either way, the always-on surfaces must still register,
+  and the optional features must be requested through `ctx.inject`. This is the
+  gate for the `pending (waiting for service: uiWorkspace)` regression.
+- `test/at-source.mjs` (0.4.0) — the `@` source's query resolution (alias and
+  absolute forms, one-directory enumeration, name-search fallback), `drill: true`
+  on directory rows only, the Tab outcome (trailing slash, quote kept open for
+  spaced paths, menu kept open), the breadcrumb header, and degradation to an empty
+  group.
+- `test/browser.mjs` (0.4.0) — the owned browser end to end through its real
+  rendered handlers: opens at home when no picker exists, descends, walks back via
+  breadcrumbs, refuses a blank folder name before any RPC, creates a folder and
+  enters it, discloses truncation, commits the highlighted level and closes, stays
+  open with the error inline when the add or the listing fails, prefers the native
+  picker when one answers, degrades when one throws `unavailable`, and injects its
+  stylesheet exactly once using only theme tokens.
 
 `test/smoke-client.mjs` still targets the **pre-0.3.0** client (session-header
 button, overlay panel, and the three elected session-creation seats) and
-therefore **fails against the 0.3.0 UI**; it needs rewriting against the current
-surfaces — the `ctx.commandUi.decorate` `popupSelect` spec (options rows,
-add/remove routing, confirmation payload) and the `@`-trigger source (group
-merge, absolute paths, error degradation to an empty group). Its
-declaration-aware `slots.inject` mock and React shim remain reusable for that.
+therefore **fails against the current UI**; the suites above cover the surfaces it
+used to claim. Its declaration-aware `slots.inject` mock and React shim were the
+starting point for `activation.mjs` / `at-source.mjs` / `browser.mjs`; deleting it
+or folding its remaining cases in is open work.
 

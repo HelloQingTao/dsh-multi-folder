@@ -252,7 +252,11 @@ const preStepOut = await preStep(
 );
 assert(preStepOut.kind === 'enter', 'pre-step enter');
 assert(preStepOut.messages.length === 2, 'notice prepended');
-assert(preStepOut.messages[0].source.kind === 'plugin' && preStepOut.messages[0].source.form === 'notice', 'notice source shape');
+// The notice source kind must be PRODUCER-OWNED (`plugin:<plugin>`): session
+// format v4 rejects the retired catch-all `kind: 'plugin'` and throws from the
+// JSONL writer, failing the run and potentially retaining the session write
+// handle (which later surfaces as `session/writer-held` on command.list).
+assert(preStepOut.messages[0].source.kind === 'plugin:dsh-multi-folder' && preStepOut.messages[0].source.form === 'notice', 'notice source shape');
 assert(preStepOut.messages[1].id === 'm1', 'original message preserved');
 
 // 5. Post-execute channel: additionalContexts attached at a tool-call boundary

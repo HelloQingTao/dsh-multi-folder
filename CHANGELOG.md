@@ -2,6 +2,59 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] — 2026-09-29
+
+### Fixed
+
+- **The plugin never activated on profiles that do not compose the workspace
+  UI: `web boot: 1 entry did not activate — pending (waiting for service:
+  uiWorkspace)`.** `exports.inject` is a hard activation gate, and the client
+  half listed three optional services there — `uiWorkspace` (inherited from
+  0.2.x) plus `inputTriggers` and `commandUi` (added in 0.3.0). A profile
+  without them left the entire entry pending, so even the `/multi-folder`
+  command and the sandbox interception went missing.
+  - The inject list is now limited to services every web profile composes.
+  - `uiWorkspace` resolves lazily at pick time (`ctx.get`), with the older
+    `workspaces.pickDirectory` as fallback;
+  - `commandUi` and `inputTriggers` attach through `ctx.inject`, which fires
+    when the service appears and never fires when the shell does not compose
+    it — the feature is skipped instead of blocking the whole entry.
+  - Pinned by a regression gate (`test/activation.mjs`) that applies the client
+    bundle against a minimal shell (none of the three present) and a full one.
+- **A notice could fail the run and strand the session write handle.** The
+  notice `source.kind` was the retired catch-all `plugin`; session format v4
+  rejects it from the JSONL writer (`format v4 message requires a producer-owned
+  source kind`), so logging a notice after an add/remove threw mid-write. That
+  is what surfaced as `session/writer-held` on `command.list` — an older session
+  whose "+" Commands group came up empty while fresh sessions worked. The kind is
+  now the producer-owned `plugin:dsh-multi-folder`, the spelling the v3→v4
+  migration itself produces.
+
+### Added
+
+- **`@` references now drill into subdirectories, like the shipped source.**
+  Directory rows carry `drill: true`, so Tab descends instead of committing:
+  it inserts the directory with a trailing slash (keeping the quote open for
+  spaced paths, exactly as `formatFileMention` does) and the menu re-tracks the
+  new query. Queries accept both the alias form (`@<dir-name>/rest`) and the
+  absolute form a drill inserts, so Tab works repeatedly, and a breadcrumb
+  `header` walks back up. Directories sort before files.
+- **An owned directory browser for "Add directory".** `uiWorkspace.pickDirectory()`
+  is native-only — a LAN bind, a remote browser client, or a desktop shell
+  answers `directory-picker/unavailable` — so the interaction now falls back to
+  a browser this plugin draws and serves over the new `multiFolder/browse` +
+  `multiFolder/makeDir` endpoints (listing rides the `fs` seam every composition
+  provides). The native picker still wins wherever it can answer; a picker that
+  refuses degrades to the browser instead of showing an unusable error. The
+  browser is drawn entirely from `--dsw-alias-*` tokens, so it follows the theme
+  and any applied skin.
+
+### Changed
+
+- `multiFolder/listFiles` takes the workspace and **refuses any directory
+  outside the configured secondary roots**, so it cannot degrade into a general
+  path enumerator.
+
 ## [0.3.0] — 2026-09-28
 
 ### Added

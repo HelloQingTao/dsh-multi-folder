@@ -8,6 +8,7 @@
 import { name, inject, apply } from '../lib/index.js';
 import { join } from 'node:path';
 import os from 'node:os';
+import { mkdtemp } from 'node:fs/promises';
 
 const listeners = new Map(); // eventName -> [fn]
 const sections = [];
@@ -117,9 +118,9 @@ await executeListener(
 assert(typertContributions.length === 1, 'typert contribution registered');
 const contribution = typertContributions[0];
 assert(contribution.package === 'dsh-multi-folder' && contribution.face === 'host', 'contribution identity');
-assert(Array.isArray(contribution.invocations) && contribution.invocations.length === 5, 'five remote endpoints');
+assert(Array.isArray(contribution.invocations) && contribution.invocations.length === 7, 'seven remote endpoints');
 const methods = contribution.invocations.map((d) => d.method).sort().join(',');
-assert(methods === 'add,list,listFiles,remove,set', 'endpoint method roster');
+assert(methods === 'add,browse,list,listFiles,makeDir,remove,set', 'endpoint method roster');
 for (const descriptor of contribution.invocations) {
   assert(descriptor.namespace === 'multiFolder' && descriptor.service === 'multiFolder', 'namespace/service: ' + descriptor.method);
   assert(descriptor.invocation && descriptor.invocation.kind === 'direct', 'direct invocation: ' + descriptor.method);
@@ -133,7 +134,7 @@ assert(listParams.join(',') === 'workspace', 'list wire shape');
 const setParams = contribution.invocations.find((d) => d.method === 'set').parameters.map((p) => p.wire);
 assert(setParams.join(',') === 'workspace,dirs', 'set wire shape');
 const listFilesParams = contribution.invocations.find((d) => d.method === 'listFiles').parameters.map((p) => p.wire);
-assert(listFilesParams.join(',') === 'dir,query', 'listFiles wire shape');
+assert(listFilesParams.join(',') === 'workspace,dir,query', 'listFiles wire shape');
 
 const api = provided.get('multiFolder');
 assert(api !== undefined, 'multiFolder service provided');
@@ -191,28 +192,103 @@ assert(repeat.changed === false && Array.isArray(repeat.dirs), 'repeat add repor
 assert(typeof repeat.note === 'string' && repeat.note.length > 0, 'repeat add carries a note');
 await api.remove(ws, SEC);
 
-// ------------------------------------------------------- listFiles (0.3.0)
+// ------------------------------------------------------- listFiles (0.3.x)
+// The endpoint is fenced: `dir` must live inside one of the workspace's
+// configured secondary directories, so it can never enumerate arbitrary paths.
 const READSEC = 'C:\\workspaces\\readsec'
 dirStore.set(READSEC, [
   { name: 'alpha.ts', type: 'file' },
   { name: 'pkg', type: 'directory' },
   { name: 'notes.md', type: 'file' },
 ]);
-const all = await api.listFiles(READSEC, '');
+await api.set(ws, [READSEC]);
+const all = await api.listFiles(ws, READSEC, '');
 assert(Array.isArray(all) && all.length === 3, 'listFiles lists direct children for an empty query');
 assert(all.every((c) => c.path.startsWith(READSEC.replace(/\\/g, '/') + '/')), 'listFiles returns slash-normalized absolute paths');
 const dirRow = all.filter((c) => c.path.endsWith('/pkg'))[0];
 assert(dirRow !== undefined && dirRow.kind === 'directory', 'listFiles keeps directory kind');
 assert(all.filter((c) => c.kind === 'file').length === 2, 'listFiles keeps file kind');
-const filtered = await api.listFiles(READSEC, 'ALP');
+// Directories sort first so drilling is discoverable (matches the shipped kindRank).
+assert(all[0].kind === 'directory' && all[0].path.endsWith('/pkg'), 'listFiles sorts directories before files');
+const filtered = await api.listFiles(ws, READSEC, 'ALP');
 assert(filtered.length === 1 && filtered[0].path.endsWith('alpha.ts'), 'listFiles query matches the name case-insensitively');
-const trailing = await api.listFiles(READSEC, 'pkg/alp');
+const trailing = await api.listFiles(ws, READSEC, 'pkg/alp');
 assert(trailing.length === 1 && trailing[0].path.endsWith('alpha.ts'), 'listFiles matches the last segment of a drilled query');
-await api.listFiles('C:\\definitely\\not\\a\\directory', '').then(
+await api.listFiles(ws, 'C:\\definitely\\not\\a\\directory', '').then(
   (r) => { assert(Array.isArray(r) && r.length === 0, 'listFiles on an unreadable dir returns []'); },
   () => { throw new Error('FAIL: listFiles should not reject for a missing directory'); },
 );
-assert((await api.listFiles('', 'x')).length === 0, 'listFiles ignores an empty dir');
+assert((await api.listFiles(ws, '', 'x')).length === 0, 'listFiles ignores an empty dir');
+// FENCE: a directory outside every configured secondary root returns nothing,
+// even though the fs could read it. This is the security-relevant case.
+const OUTSIDE = 'C:\\Windows\\System32';
+dirStore.set(OUTSIDE, [{ name: 'secret.txt', type: 'file' }]);
+assert((await api.listFiles(ws, OUTSIDE, '')).length === 0, 'listFiles refuses a path outside the configured secondary directories');
+// A subdirectory of a configured root stays reachable (the drill chain).
+dirStore.set(READSEC + '/pkg/', [{ name: 'deep.ts', type: 'file' }]);
+const drilled = await api.listFiles(ws, READSEC + '/pkg/', '');
+assert(drilled.length === 1 && drilled[0].path.endsWith('deep.ts'), 'listFiles reaches subdirectories of a configured root');
+assert(drilled[0].path.indexOf('//') < 0, 'listFiles never emits doubled separators for a trailing-slash dir');
+await api.remove(ws, READSEC);
+
+// ------------------------------------------------- browse (the owned browser)
+dirStore.set('C:\\levels', [
+  { name: 'Beta', type: 'directory' },
+  { name: 'alpha', type: 'directory' },
+  { name: '.hidden', type: 'directory' },
+  { name: 'afile.ts', type: 'file' },
+]);
+const level = await api.browse('C:\\levels');
+assert(level.path === 'C:/levels', 'browse canonicalizes the level path to slashes: ' + level.path);
+assert(level.parent === 'C:', 'browse reports the parent for upward navigation');
+assert(level.home === os.homedir().replace(/\\/g, '/'), 'browse carries the home directory');
+assert(level.entries.length === 3, 'browse lists directories only (files dropped): ' + JSON.stringify(level.entries.map((e) => e.name)));
+// localeCompare ordering is locale-dependent (and the browser shows Chinese
+// directory names), so assert "sorted, not insertion order" rather than a
+// fixed permutation.
+const names = level.entries.map((e) => e.name);
+assert(names.join(',') !== 'Beta,alpha,.hidden', 'browse sorts instead of returning insertion order');
+assert(
+  names.every((n, i) => i === 0 || names[i - 1].localeCompare(n) <= 0),
+  'browse entries are ordered by name: ' + names.join(','),
+);
+assert(level.entries.find((e) => e.name === '.hidden').hidden === true, 'browse flags hidden entries for the client to style');
+assert(level.entries.find((e) => e.name === 'alpha').hidden === false, 'visible entries are not flagged');
+assert(level.truncated === false, 'browse reports cap state');
+// The mock resolves by raw path string, so seed the real home directory too.
+dirStore.set(os.homedir(), [{ name: 'seeded', type: 'directory' }]);
+const fromHome = await api.browse('');
+assert(fromHome.path === os.homedir().replace(/\\/g, '/'), 'an empty browse path starts at home');
+assert(fromHome.entries.length === 1 && fromHome.entries[0].name === 'seeded', 'home listing returns an entries array');
+await api.browse('relative/path').then(
+  () => { throw new Error('FAIL: browse should require a fully qualified path'); },
+  (e) => { assert(String(e.message).includes('fully qualified'), 'browse rejects a relative path'); },
+);
+dirStore.delete('C:\\missing');
+await api.browse('C:\\missing').then(
+  () => { throw new Error('FAIL: browse should reject an unreadable directory'); },
+  (e) => { assert(String(e.message).includes('not a readable directory'), 'browse reports an unreadable directory'); },
+);
+
+// makeDir runs against a real temporary directory (the fs seam has no create).
+const tmpRoot = await mkdtemp(join(os.tmpdir(), 'mf-browse-'));
+const made = await api.makeDir(tmpRoot, 'created-by-test');
+assert(made.path.replace(/\\/g, '/').endsWith('/created-by-test'), 'makeDir returns the created path');
+await api.makeDir(tmpRoot, 'created-by-test').then(
+  () => { throw new Error('FAIL: makeDir should reject an existing name'); },
+  (e) => { assert(String(e.message).includes('already exists'), 'makeDir surfaces EEXIST as a clear error (proves the directory was created)'); },
+);
+for (const [badParent, badName, label] of [
+  ['relative/parent', 'x', 'a relative parent'],
+  [tmpRoot, 'a/b', 'a nested name'],
+  [tmpRoot, '..', 'a traversal name'],
+  [tmpRoot, '  ', 'a blank name'],
+]) {
+  await api.makeDir(badParent, badName).then(
+    () => { throw new Error('FAIL: makeDir should reject ' + label); },
+    (e) => { assert(/fully qualified|single path segment/.test(String(e.message)), 'makeDir rejects ' + label); },
+  );
+}
 
 // Error surface: business failures reject with a prefixed message.
 await api.add(ws, 'relative\\path').then(
