@@ -460,6 +460,32 @@ communication); those UI registrations are no longer made.
   (`dsh-client-ui-theme`) with inert fallbacks, so themes and applied skins
   restyle this plugin's chip and panel along with the shell's own controls.
 
+## Root causes behind the 0.4.2 fixes
+
+Both were invisible to the mocks; only a real host could show them.
+
+**A volume root is the one directory the `fs` seam cannot list.** `listDir`
+probes every child (realpath + `stat`) and throws `listingIoError` for the
+**whole** level as soon as one child cannot be probed. Every Windows volume root
+is that case — `System Volume Information` (EPERM), `hiberfil.sys`,
+`pagefile.sys`, `swapfile.sys` (EBUSY), `DumpStack.log.tmp`, `PerfLogs`,
+`Recovery` — so `browse('C:/')` always answered `not a readable directory` and
+0.4.1's "This PC" level, reachable only by stepping up out of a drive root, was
+structurally unreachable on Windows. A mock whose `listDir` returns a friendly
+array never shows this, which is why `smoke-host` now drives the fallback through
+a real directory. The listing therefore tries the seam first (the sandbox-aware,
+mockable path) and falls back to `node:fs` — `readdir` plus one tolerant probe per
+child — at the same privilege level `listDrives` and `makeDir` already use.
+
+**`dsh-shell` has two contract generations.** 0.1.7 exposes `resolve` + `execute`,
+where `execute(spec)` resolves with the live handle and `result()` projects it
+into the foreground result; the older service exposed `run` (foreground) and
+`start` (background). A plugin written against one pair throws `… is not a
+function` on the other. The interception handler probes per call
+(`typeof shell.execute === 'function'`) and both branches are covered by
+`test/intercept.mjs`, which now impersonates one generation at a time instead of
+a mock that only satisfied the old pair.
+
 ## Known limitations
 
 - Each confined command runs under exactly ONE writable root: the Windows ACL

@@ -65,10 +65,15 @@ function level(path, parent, entries, truncated) {
 }
 let failNextBrowse = false;
 let failNextAdd = false;
+// A held response, so a test can look at the dialog while an operation is
+// genuinely in flight: the busy LABEL must belong to the creating action only.
+let rpcGate = null;
+let gatedEndpoint = null;
 const connection = {
   rpc: {
     async call(channel, endpoint, payload) {
       rpc.push({ endpoint, args: payload.args });
+      if (gatedEndpoint !== null && endpoint === gatedEndpoint && rpcGate !== null) await rpcGate;
       if (endpoint === 'multiFolder/list') return { ok: true, value: { workspace: WS, dirs: [] } };
       if (endpoint === 'multiFolder/browse') {
         if (failNextBrowse) { failNextBrowse = false; return { ok: false, error: { message: 'not a readable directory: X' } }; }
@@ -367,6 +372,90 @@ assert(lastRpc().endpoint === 'multiFolder/browse' && lastRpc().args.path === ''
   assert(folderGlyphs.length === 1 && folderGlyphs[0].props.className.includes('mf-bw-folder'),
     'folder rows use the folder glyph: ' + JSON.stringify(folderGlyphs.map((g) => g.props.className)));
   assert(!JSON.stringify(folderGlyphs).includes('\u29c9'), 'the text placeholder glyph is gone');
+  await dismiss();
+}
+
+// ---- 14. a drive root's crumb is ONE fully qualified level --------------
+{
+  // The mock must be able to answer the level BELOW a drive root: `D:/` lists a
+  // `tools` row in section 13, but the level itself was never seeded.
+  tree['D:/tools'] = () => level('D:/tools', 'D:/', []);
+  const spec = services.commandUi.decorations[0].ui;
+  await spec.onSelect({ id: '__add__' }, { sessionId: 'blank' });
+  await settle();
+  // home still carries the seeded second volume as the second row.
+  click(byClass(render(), 'mf-bw-row')[1]);          // into D:/
+  await settle();
+  const driveAgain = render();
+  const driveCrumbs = byClass(driveAgain, 'mf-bw-crumb');
+  assert(driveCrumbs.length === 1, 'a drive root renders exactly one crumb: ' + JSON.stringify(driveCrumbs.map(textOf)));
+  assert(textOf(driveCrumbs[0]) === 'D:', 'the drive crumb is labelled D:: ' + JSON.stringify(textOf(driveCrumbs[0])));
+  assert(byClass(driveAgain, 'mf-bw-sep').length === 0, 'no separator splits the drive root path apart');
+
+  click(byClass(driveAgain, 'mf-bw-row')[0]);        // into D:/tools
+  await settle();
+  await settle();
+  const below = render();
+  assert(lastRpc().args.path === 'D:/tools', 'a folder under a drive root browses: ' + JSON.stringify(lastRpc().args.path));
+  const driveCrumb = byClass(below, 'mf-bw-crumb')[0];
+  assert(textOf(driveCrumb) === 'D:', 'the crumb below a drive root reads D:: ' + JSON.stringify(textOf(driveCrumb)));
+  assert(
+    driveCrumb.props['aria-current'] !== 'true',
+    'the drive crumb is only inert while current: '
+      + JSON.stringify(byClass(below, 'mf-bw-crumb').map((c) => ({ l: textOf(c), cur: c.props['aria-current'] })))
+      + ' rpc=' + JSON.stringify(lastRpc().args.path),
+  );
+  click(driveCrumb);
+  await settle();
+  assert(
+    lastRpc().args.path === 'D:/',
+    'clicking the drive crumb asks for the fully qualified root, not the drive-relative D:: ' + JSON.stringify(lastRpc().args.path),
+  );
+  await dismiss();
+}
+
+// ---- 15. the busy label belongs to the CREATING action only ------------
+{
+  const spec = services.commandUi.decorations[0].ui;
+  await spec.onSelect({ id: '__add__' }, { sessionId: 'blank' });
+  await settle();
+  const label = () => {
+    const root = render();
+    if (byText(root, 'mf-bw-btn', 'browser.creating') !== undefined) return 'browser.creating';
+    if (byText(root, 'mf-bw-btn', 'browser.newFolder') !== undefined) return 'browser.newFolder';
+    return 'missing';
+  };
+  assert(label() === 'browser.newFolder', 'an idle browser labels the action New folder: ' + label());
+
+  // (a) NAVIGATING is busy but is not creating — the shipped bug announced
+  //     "Creating…" here, and the same for committing a directory.
+  let releaseBrowse = null;
+  rpcGate = new Promise((resolve) => { releaseBrowse = resolve; });
+  gatedEndpoint = 'multiFolder/browse';
+  click(byClass(render(), 'mf-bw-row')[0]);
+  await settle();
+  assert(label() === 'browser.newFolder', 'navigating a level must not claim to be creating: ' + label());
+  assert(byText(render(), 'mf-bw-primary', 'browser.choose').props.disabled === true, 'choosing stays disabled while navigating');
+  gatedEndpoint = null;
+  rpcGate = null;
+  releaseBrowse();
+  await settle();
+  await settle();
+
+  // (b) CREATING is the one state that says so.
+  byClass(render(), 'mf-bw-input')[0].props.onChange({ currentTarget: { value: 'fresh' } });
+  let releaseCreate = null;
+  rpcGate = new Promise((resolve) => { releaseCreate = resolve; });
+  gatedEndpoint = 'multiFolder/makeDir';
+  click(byText(render(), 'mf-bw-btn', 'browser.newFolder'));
+  await settle();
+  assert(label() === 'browser.creating', 'an in-flight folder creation is the one "Creating…": ' + label());
+  gatedEndpoint = null;
+  rpcGate = null;
+  releaseCreate();
+  await settle();
+  await settle();
+  assert(label() === 'browser.newFolder', 'the label returns to New folder when creation settles: ' + label());
   await dismiss();
 }
 

@@ -62,6 +62,72 @@ let writeFailure = null;
 let startGate = null;
 let startFailure = null;
 
+// The shell service has TWO contract generations and this suite must exercise
+// BOTH. Current dsh exposes `resolve` + `execute`, where `execute` returns the
+// live handle plus the foreground projection `result()`; the older service
+// exposed `run` (foreground) + `start` (background). A mock that offered both at
+// once would let the plugin's probe pick `execute` and silently skip the legacy
+// branch — the same class of false green this file exists to prevent — so the
+// mock impersonates ONE generation at a time and section 18 flips it.
+const shellExecutes = [];
+let shellContract = 'execute';
+
+/** The foreground projection both generations must be able to produce. */
+const foregroundResult = () => ({
+  exitCode: 0,
+  signal: null,
+  timedOut: false,
+  aborted: false,
+  timeoutMs: 1000,
+  stdout: { text: 'ok\r\n', truncated: false },
+  stderr: { text: '', truncated: false },
+  sandbox: { mode: 'workspace-write', denied: false, enforcement: 'partial' },
+});
+
+const makeShellService = () => ({
+  resolve(request) {
+    return { request };
+  },
+  ...(shellContract === 'execute'
+    ? {
+      // The REAL current contract: launch preparation is asynchronous (Windows
+      // ACL grants included) and rejects when cancelled or fails, so the handle
+      // must be awaited before `proc.done`/`readOutput` are touched.
+      async execute(spec) {
+        shellExecutes.push(spec);
+        // Recorded BEFORE the preparation gate, like the legacy `start`: a
+        // launch held in preparation must already be visible and cancellable.
+        // A launch that arms no deadline is the background shape; consuming
+        // `result()` is the foreground shape (see the legacy `run` below).
+        if (spec.onExpiry === 'none') shellStarts.push(spec);
+        if (startGate !== null) await startGate;
+        if (startFailure !== null) throw startFailure;
+        return {
+          ...(fakeProc === null ? {} : fakeProc),
+          result: async () => {
+            shellRuns.push(spec.request);
+            return foregroundResult();
+          },
+        };
+      },
+    }
+    : {
+      async run(spec) {
+        shellRuns.push(spec.request);
+        return foregroundResult();
+      },
+      // The legacy contract, kept verbatim: a synchronous-looking `start` here
+      // is what once let the regression through (`proc.done` off the un-awaited
+      // promise threw `Cannot read properties of undefined (reading 'then')`).
+      async start(spec) {
+        shellStarts.push(spec);
+        if (startGate !== null) await startGate;
+        if (startFailure !== null) throw startFailure;
+        return fakeProc;
+      },
+    }),
+});
+
 const fsMock = {
   async resolve(path, opts) {
     const key = normalize(path);
@@ -111,39 +177,7 @@ const makeCtx = (listenersMap, overrides = {}) => ({
     emitted.push({ event, args });
   },
   get(name) {
-    if (name === 'shell') {
-      return {
-        resolve(request) {
-          return { request };
-        },
-        async run(spec) {
-          shellRuns.push(spec.request);
-          return {
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            aborted: false,
-            timeoutMs: 1000,
-            stdout: { text: 'ok\r\n', truncated: false },
-            stderr: { text: '', truncated: false },
-            sandbox: { mode: 'workspace-write', denied: false, enforcement: 'partial' },
-          };
-        },
-        // The REAL contract (DSH >= 0.1.6-alpha.1) is async: `shell.start`
-        // resolves the process handle only after launch preparation (Windows
-        // ACL grants included) and rejects when preparation is cancelled or
-        // fails. A synchronous mock here is exactly what let the regression
-        // through — `proc.done` off the returned promise threw
-        // `Cannot read properties of undefined (reading 'then')`, so NO
-        // background run inside a secondary directory could start at all.
-        async start(spec) {
-          shellStarts.push(spec);
-          if (startGate !== null) await startGate;
-          if (startFailure !== null) throw startFailure;
-          return fakeProc;
-        },
-      };
-    }
+    if (name === 'shell') return makeShellService();
     if (name === 'shellEnv') {
       return { collect() { return { DSH_TEST: '1' }; } };
     }
@@ -792,5 +826,48 @@ assert(unresolvable !== 'PASSTHROUGH' && nextR === 0, 'unresolvable secondary pa
 assert(unresolvable.isError === true, 'unresolvable secondary path is an error result');
 assert(unresolvable.content[0].text.includes('illegal characters'), 'resolution failure surfaced');
 assert(unresolvable.error.info && unresolvable.error.info.code === 'FS_INVALID_PATH', 'resolution failure code preserved');
+
+// 18. The OTHER shell contract generation. Everything above ran against the
+//     current `resolve` + `execute` service; a host that still exposes only
+//     `run`/`start` must intercept identically (`shell.execute is not a
+//     function` there would take every secondary-directory run down).
+shellContract = 'legacy';
+startGate = null;
+startFailure = null;
+const legacyRunsBefore = shellRuns.length;
+const legacyStartsBefore = shellStarts.length;
+const legacyExecutesBefore = shellExecutes.length;
+
+const legacyForeground = await execWrite(
+  { name: 'pwsh', arguments: { command: 'echo legacy', workdir: SEC2, timeoutMs: 5000 }, agent, signal: undefined },
+  nextPassthrough,
+);
+assert(legacyForeground !== 'PASSTHROUGH' && legacyForeground.isError === false, 'legacy shell: foreground intercepted: ' + JSON.stringify(legacyForeground));
+assert(shellRuns.length === legacyRunsBefore + 1, 'legacy shell: foreground goes through shell.run');
+assert(legacyForeground.value.kind === 'foreground' && legacyForeground.value.exitCode === 0, 'legacy shell: foreground value shape');
+assert(legacyForeground.content[0].text.includes('ok'), 'legacy shell: foreground stdout rendered');
+assert(shellExecutes.length === legacyExecutesBefore, 'legacy shell: execute is never probed on a legacy host');
+
+fakeProc = {
+  status: 'completed',
+  exitCode: 0,
+  signal: null,
+  done: Promise.resolve(),
+  sandbox: undefined,
+  readOutput() { return { delta: 'legacy bg\r\n', lossy: false }; },
+  kill() { return true; },
+};
+const legacyBackground = await execWrite(
+  { name: 'pwsh', arguments: { command: 'echo legacy bg', workdir: SEC2, run_in_background: true }, agent, signal: undefined },
+  nextPassthrough,
+);
+assert(legacyBackground !== 'PASSTHROUGH' && legacyBackground.isError === false, 'legacy shell: background intercepted');
+assert(shellStarts.length === legacyStartsBefore + 1, 'legacy shell: background goes through shell.start');
+assert(shellStarts[shellStarts.length - 1].request.workdir === SEC2, 'legacy shell: background policy/workdir re-rooted');
+assert(shellExecutes.length === legacyExecutesBefore, 'legacy shell: background never probes execute');
+const legacyOutcome = await startedHooks.done;
+assert(legacyOutcome.status === 'completed' && legacyOutcome.detail === 'exit code: 0', 'legacy shell: job outcome completed');
+assert(startedHooks.readOutput() === 'legacy bg\r\n', 'legacy shell: background read passes through');
+shellContract = 'execute';
 
 console.log('intercept: all assertions passed');

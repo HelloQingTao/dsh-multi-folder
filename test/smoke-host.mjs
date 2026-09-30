@@ -8,7 +8,7 @@
 import { name, inject, apply } from '../lib/index.js';
 import { join } from 'node:path';
 import os from 'node:os';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 
 const listeners = new Map(); // eventName -> [fn]
 const sections = [];
@@ -278,6 +278,25 @@ dirStore.set('C:/levels/', [
 assert((await api.browse('C:/levels/')).path === 'C:/levels', 'a trailing slash on the request is tolerated');
 assert(level.home === os.homedir().replace(/\\/g, '/'), 'browse carries the home directory');
 assert(level.entries.length === 3, 'browse lists directories only (files dropped): ' + JSON.stringify(level.entries.map((e) => e.name)));
+// A level the `fs` seam CANNOT list must still browse. The seam's `listDir`
+// probes every child (realpath + stat) and fails the WHOLE level when one child
+// is unprobeable — every Windows volume root is that case (`System Volume
+// Information` EPERM, `pagefile.sys`/`hiberfil.sys` EBUSY) — which is exactly
+// why `C:/` could never be listed and "This PC" stayed unreachable. The
+// fallback lists through node:fs and drops only the unreadable children.
+const fallbackRoot = await mkdtemp(join(os.tmpdir(), 'multi-folder-browse-'));
+await mkdir(join(fallbackRoot, 'alpha'));
+await mkdir(join(fallbackRoot, 'beta'));
+await writeFile(join(fallbackRoot, 'note.txt'), 'x');
+const fallback = await api.browse(fallbackRoot);
+assert(
+  fallback.entries.map((e) => e.name).join(',') === 'alpha,beta',
+  'an unlistable seam level falls back to node:fs, directories only: ' + JSON.stringify(fallback.entries.map((e) => e.name)),
+);
+assert(
+  fallback.path === fallbackRoot.replace(/\\/g, '/'),
+  'fallback level keeps the canonical path: ' + fallback.path,
+);
 // localeCompare ordering is locale-dependent (and the browser shows Chinese
 // directory names), so assert "sorted, not insertion order" rather than a
 // fixed permutation.

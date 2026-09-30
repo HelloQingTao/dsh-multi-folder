@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.2] — 2026-09-30
+
+Two defects only a real host could show: the volume level 0.4.1 added was
+unreachable on Windows, and every bash/pwsh call in a secondary directory threw
+on a current dsh.
+
+### Fixed
+
+- **A volume root could never be listed, so "This PC" was unreachable.** Levels
+  were listed through the `fs` seam's `listDir`, which probes every child
+  (realpath + `stat`) and fails the **whole** directory when one child cannot be
+  probed — the normal state of every Windows volume root (`System Volume
+  Information` EPERM, `hiberfil.sys`/`pagefile.sys` EBUSY). `C:/` therefore
+  answered `multi-folder: not a readable directory: C:/`, and stepping up out of
+  `C:/Users/…` never reached the volume list. A level the seam cannot answer for
+  is now read through `node:fs` (`readdir` plus one tolerant probe per child),
+  where only the unreadable children drop out; the seam still answers first, so
+  the sandbox-aware path stays the common case.
+- **Every bash/pwsh call in a secondary directory threw `shell.run is not a
+  function` on dsh 0.1.7.** `dsh-shell` replaced `run`/`start` with `resolve` +
+  `execute` (an execution handle whose `result()` is the foreground projection),
+  and this plugin still called the old pair. Both generations are now supported: a
+  per-call probe picks `execute` when it exists (`onExpiry: 'none'` for a
+  background launch, so the process outlives the tool call) and falls back to
+  `run`/`start` otherwise.
+- **The dialog announced "Creating…" while the user was only choosing a
+  directory.** The *New folder* action's label was driven by the single shared
+  busy flag, so navigating a level or committing a directory — both busy, neither
+  creating — relabelled it `创建中…` / `Creating…`. The label now follows a flag set
+  only by an in-flight folder creation, while the shared flag still gates every
+  control as before.
+
+### Changed
+
+- `test/intercept.mjs` now impersonates ONE shell contract generation at a time
+  and drives the interception paths through both (section 18); a mock exposing
+  both at once would let the probe pick `execute` and silently skip the legacy
+  branch.
+- `test/smoke-host.mjs` adds the case that mattered: a level whose seam listing
+  fails must still browse, directories only.
+
 ## [0.4.1] — 2026-09-29
 
 Polish and fixes for the owned directory browser introduced in 0.4.0, all
