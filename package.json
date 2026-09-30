@@ -1,6 +1,6 @@
 {
   "name": "@zfgcta/dsh-multi-folder",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DeepSeek Harness plugin: secondary working directories for a project. The agent keeps the primary workspace as cwd, gains equal write/exec permissions on configured secondary directories under workspace-write mode, and is notified of configuration changes at the next message boundary. Managed from the composer's own '+' menu (official option picker, with an owned directory browser when no native picker can answer), configurable before the first message through a sessionless multiFolder remote API, and referenceable with @ in the input, subdirectories included.",
   "keywords": [
     "dsh-plugin",

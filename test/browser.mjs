@@ -308,8 +308,66 @@ assert(lastRpc().endpoint === 'multiFolder/browse' && lastRpc().args.path === ''
   assert(styleTags.length === 1, 'the browser stylesheet is injected exactly once: ' + styleTags.length);
   const css = styleTags.map((tag) => tag.textContent).join('\n');
   assert(css.includes('--dsw-alias-'), 'the browser styles use official design tokens');
-  const unthemed = css.replace(/var\(--dsw-alias-[^)]*\)/g, '');
-  assert(!/#[0-9a-fA-F]{3,6}\b/.test(unthemed), 'no raw color sits outside a token fallback');
+  // Any theme token counts as themed — the shell also ships --dsw-radius-*,
+  // --dsw-elevation-*, --dsw-menu-*, --dsw-mask-*, --dsw-static-* and --ds-*.
+  // Strip nested var() calls so a fallback like rgba(...) is not mistaken for
+  // a hard-coded colour.
+  const unthemed = css.replace(/\bvar\((--[A-Za-z0-9-]+)([^()]|\([^()]*\))*\)/g, 'VAR');
+  assert(!/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(unthemed),
+    'no raw color sits outside a theme fallback: ' + JSON.stringify((unthemed.match(/#[0-9a-fA-F]{3,8}|\w+\(/g) || []).slice(0, 5)));
+}
+
+// ---- 13. the volume list: reachable, labelled, and not committable -----
+{
+  // Seed a second volume under home, whose parent is the synthetic list, so the
+  // client can be walked there purely by clicking: home -> D:/ -> Up.
+  tree['this-pc/'] = () => ({
+    path: 'this-pc/', parent: null, home: HOME, drives: true, truncated: false,
+    entries: [
+      { name: 'C:', path: 'C:/', hidden: false, drive: true },
+      { name: 'D:', path: 'D:/', hidden: false, drive: true },
+    ],
+  });
+  tree['D:/'] = () => level('D:/', 'this-pc/', [{ name: 'tools', path: 'D:/tools', hidden: false }]);
+  // The browser opens at an EMPTY path, which the host resolves to home: both
+  // keys must agree or the seeded volumes never appear.
+  const homeWithVolumes = () => level(HOME, null, homeEntries().concat([{ name: 'D:', path: 'D:/', hidden: false }]));
+  tree[''] = homeWithVolumes;
+  tree[HOME] = homeWithVolumes;
+
+  const spec = services.commandUi.decorations[0].ui;
+  await spec.onSelect({ id: '__add__' }, { sessionId: 'blank' });
+  await settle();
+  const opened = render();
+  assert(byClass(opened, 'mf-bw-row').length === 2, 'home now shows docs and the second volume: ' + JSON.stringify(allClasses(opened)));
+  click(byClass(opened, 'mf-bw-row')[1]);           // into D:/
+  await settle();
+  const driveLevel = render();
+  assert(lastRpc().args.path === 'D:/', 'a volume row browses to its drive root');
+  assert(byClass(driveLevel, 'mf-bw-up').length === 1, 'a drive root still offers Up (to the volume list)');
+  click(byClass(driveLevel, 'mf-bw-up')[0]);
+  await settle();
+
+  const root = render();
+  assert(lastRpc().args.path === 'this-pc/', 'Up from a drive root asks for the volume list');
+  assert(byClass(root, 'mf-bw-row').length === 2, 'every volume renders as its own row');
+  assert(byClass(root, 'mf-bw-crumb').length === 1, 'exactly one crumb renders for the synthetic level');
+  assert(textOf(byClass(root, 'mf-bw-crumb')[0]) === 'browser.pc', 'the crumb reads as a label, not the raw marker');
+  const choose = byText(root, 'mf-bw-primary', 'browser.choose');
+  assert(choose.props.disabled === true, 'the volume list cannot be committed as a directory');
+  assert(byText(root, 'mf-bw-btn', 'browser.newFolder').props.disabled === true, 'no folder creation inside the volume list');
+  const glyphs = findAll(byClass(root, 'mf-bw-row')[0], (n) => n.props.className.split(/\s+/).includes('mf-bw-glyph'));
+  assert(glyphs.length === 1 && glyphs[0].props.className.includes('mf-bw-drive'), 'volume rows use the drive glyph');
+  await dismiss();
+
+  // Positive control: an ordinary folder row uses the folder glyph instead.
+  await spec.onSelect({ id: '__add__' }, { sessionId: 'blank' });
+  await settle();
+  const folderGlyphs = findAll(byClass(render(), 'mf-bw-row')[0], (n) => n.props.className.split(/\s+/).includes('mf-bw-glyph'));
+  assert(folderGlyphs.length === 1 && folderGlyphs[0].props.className.includes('mf-bw-folder'),
+    'folder rows use the folder glyph: ' + JSON.stringify(folderGlyphs.map((g) => g.props.className)));
+  assert(!JSON.stringify(folderGlyphs).includes('\u29c9'), 'the text placeholder glyph is gone');
+  await dismiss();
 }
 
 console.log('browser: all assertions passed');

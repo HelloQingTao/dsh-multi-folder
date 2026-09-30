@@ -23,6 +23,16 @@ granted the session. The design enforces four boundaries:
    child segment. Neither writes the configuration store — a chosen directory still
    commits through the same user-only channel as every other add.
 
+   Deliberate scope note: unlike `listFiles`, `browse` is **not** restricted to the
+   configured roots — it is the directory chooser, so it must be able to reach any
+   directory the user could have picked in the native dialog it replaces, and it
+   exposes directory *names* at each level plus the mounted-volume list on Windows
+   (`this-pc/`, probed `A:`–`Z:`). That is a name-disclosure surface bounded by the
+   same trust boundary as the browser itself: it is served only to the authenticated
+   web UI over the trusted browser→host RPC channel, and it is never exposed as an
+   agent tool. `makeDir` can create one empty directory where the user is looking, and
+   nothing else.
+
 3. **Host-owned configuration store.** Per-workspace configuration lives in
    `<DSH_HOME>/storages/multi-folder/<workspace-key>.json` — outside every agent
    sandbox root. The agent's own tools cannot read-write there under `read-only` or

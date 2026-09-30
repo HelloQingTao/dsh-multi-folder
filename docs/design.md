@@ -2,7 +2,7 @@
 
 Architecture and invariants of `dsh-multi-folder`.
 
-> **Version note (0.4.0).** The client entry points described below under
+> **Version note (0.4.x).** The client entry points described below under
 > "hero seat election" — the session-header button, the `conversation.input.dock`
 > chip, the upstream hero chip, and the fixed fallback launcher — were replaced by
 > a single integration with the shell's own surfaces: the `/multi-folder` command
@@ -162,7 +162,7 @@ opens its own **sessionless** endpoints on the shared `/api` RPC channel:
   | `multiFolder/remove` | `workspace`, `path` | `{ workspace, dirs, changed }` |
   | `multiFolder/set` | `workspace`, `dirs` | `{ workspace, dirs, changed }` |
   | `multiFolder/listFiles` | `workspace`, `dir`, `query` | `[{ path, kind }]` — direct children of one directory, directories first, `path` absolute with POSIX slashes, `query` matched against the last path segment (case-insensitive `includes`) |
-  | `multiFolder/browse` | `path` | `{ path, parent, home, entries, truncated }` — child **directories** of one level, for the owned browser |
+  | `multiFolder/browse` | `path` | `{ path, parent, home, entries, truncated, drives? }` — child **directories** of one level, for the owned browser; `this-pc/` answers the mounted-volume list on Windows |
   | `multiFolder/makeDir` | `parent`, `name` | `{ path, parent }` — one validated child segment created with `mkdir` |
 
   `listFiles` exists for the `@`-reference source: it enumerates the direct
@@ -182,6 +182,22 @@ opens its own **sessionless** endpoints on the shared `/api` RPC channel:
   fully qualified path. `makeDir` mirrors the shipped browse backend
   (`dsh-host-directory-picker-browse`) by calling Node's `mkdir` on one
   validated segment, non-recursive on purpose.
+
+  **Roots are canonicalized, not trimmed.** `C:` is *drive-relative* on Windows
+  (Node's `isAbsolute('C:')` is false — it means "current directory on drive
+  C"), so a parent computed as `C:` fails validation on the next hop. Levels
+  therefore keep the shape that is actually absolute — `C:/`, `//server/share/`,
+  `/` — validation runs before any trimming, and a trailing slash on a request
+  is accepted. This is what makes a volume root browsable at all.
+
+  **`this-pc/` — the synthetic volume level.** A drive root has no parent in the
+  filesystem tree, so clicking alone could never cross volumes. `browse` answers
+  the reserved path `this-pc/` on Windows with one entry per mounted volume
+  (probing `A:`–`Z:` with `statSync`, skipping absent or not-ready ones) and
+  flags the level `drives: true`; `parent: null` puts the Up affordance away and
+  the client disables *Choose this directory* and *New folder* there, because the
+  listing is not a directory. It is the only path shape that is not a real
+  filesystem location, and it reads names only, never contents.
 
   The workspace argument is a **path**, not a session id; the client derives
   it from the workspaces store (`WorkspaceView.path`). Business errors throw
@@ -315,9 +331,25 @@ self-drawn surface, the directory browser, for a reason recorded below.
     it. Its `SelectOption` contract has no per-row button slot either — the whole
     row is the target — which is also why removals are a separate row behind a
     `confirmation` rather than an inline "×".
-  - Styling comes only from `--dsw-alias-*` tokens (no raw colour outside a
-    `var(...)` fallback), so it follows the theme and any applied skin; the
-    stylesheet is injected once behind a `data-plugin-css` guard.
+  - Styling comes only from theme tokens — no raw colour outside a `var(...)`
+    fallback — so it follows the theme and any applied skin; the stylesheet is
+    injected once behind a `data-plugin-css`. `test/token-hygiene.mjs` fails the
+    build if a referenced `TOKEN.<key>` is undefined (a deleted key would splice
+    the literal `undefined` into the CSS) or if a colour escapes a fallback.
+  - **The container copies the shipped "+" popover's own recipe, not a generic
+    card.** That popover is a *MenuSurface*: `--dsw-menu-surface-fill` is
+    deliberately translucent (light `#f8f9fa94`) and is only legible because the
+    shell pairs it with `--dsw-menu-backdrop-filter`
+    (`blur(40px) saturate(150%)`), plus `--dsw-radius-lg` and
+    `--dsw-elevation-prominent`. Borrowing the fill **without** the paired blur
+    is precisely what let page text read straight through the dialog — so the two
+    must move together. Controls mirror the primitives they resemble:
+    `Button.sm` ghost + `Button.primary` in the footer (right-aligned, primary
+    last, no borders or divider), `Input.wrap` for the folder-name field, and the
+    folder artwork tinted `--dsw-static-amber-400`, the colour the shipped
+    file-type icons use for folders. Row glyphs are real SVG, never a text
+    placeholder; `@`-menu rows already delegate glyphs to the shell
+    (`icon: 'folder' | 'file'`).
   - A failed commit keeps the browser open and shows the error inside it:
     `mutate` / `mutateWorkspace` never reject and now return an explicit
     `{ ok, error }`, because the "+" popup path has no visible panel to surface

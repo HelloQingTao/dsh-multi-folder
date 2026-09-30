@@ -2,6 +2,63 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.1] — 2026-09-29
+
+Polish and fixes for the owned directory browser introduced in 0.4.0, all
+reported from real use.
+
+### Fixed
+
+- **`browse` refused a drive root**: `multi-folder: browse requires a fully
+  qualified path`. Stepping up out of `C:/Users/…` produced the parent `C:`,
+  which is *drive-relative* on Windows and not an absolute path, so the very
+  next hop failed — the browser could not reach a volume root, and therefore
+  could not change drive at all. Parents are now canonicalized with their
+  trailing slash kept (`C:/`, `//server/share/`), validation happens before any
+  trimming, and a trailing slash on a request is tolerated.
+- **`makeDir` could build a drive-relative path** when handed a bare `C:`; the
+  parent now goes through the same canonicalization, so a created folder always
+  lands on the intended volume.
+- **The browser let page text read through it.** The shipped "+" popover is a
+  *MenuSurface*: its fill is translucent (`--dsw-menu-surface-fill`, light
+  `#f8f9fa94`) and legible **only because it is paired with**
+  `--dsw-menu-backdrop-filter` (`blur(40px) saturate(150%)`). This plugin borrowed
+  the translucent fill without the blur. It now borrows the pair, so the surface
+  matches the native popup instead of guessing an opaque card.
+
+### Added
+
+- **"This PC" / 这台电脑 volume level.** A drive root has no parent in the
+  filesystem tree, so clicking alone could never cross volumes. Up from a drive
+  root now opens a synthetic level listing every mounted volume (probed `A:`–`Z:`,
+  unready volumes skipped). It is not selectable: *Choose this directory* and
+  *New folder* are disabled there, and its crumb is a label rather than an
+  ancestry chain.
+
+### Changed
+
+- **Real glyphs.** Rows no longer print a `⧉` character: folders render a folder
+  artwork tinted with the official `--dsw-static-amber-400` (the colour the
+  shipped file-type icons use for folders), volumes a host glyph. The `@` menu
+  rows already passed `icon: 'folder' | 'file'` to the shell renderer and are
+  unchanged.
+- **Footer buttons follow the official primitives**: `Button.sm` ghost for
+  *Cancel* and `Button.primary` for *Choose this directory*, right-aligned with
+  the primary last, no borders and no divider line. The text field follows
+  `Input.wrap` (32px, 0.5px stroke, `--dsw-alias-bg-layer-1`, business colour on
+  focus). Radius and shadow come from `--dsw-radius-lg` /
+  `--dsw-elevation-prominent` like the native popover.
+
+### Tests
+
+- `test/token-hygiene.mjs` (new): fails if any `TOKEN.<key>` referenced in code
+  is not defined (a deleted key would splice the literal `undefined` into the
+  generated CSS), if any token holds a bare colour instead of a theme `var()`,
+  and if a colour survives outside a theme fallback in the browser stylesheet.
+- `smoke-host` now pins the drive-root parent, `this-pc/` reachability and the
+  non-Windows refusal; `browser` walks home → drive root → volume list purely by
+  clicking and asserts the list cannot be committed and uses the drive glyph.
+
 ## [0.4.0] — 2026-09-29
 
 ### Fixed

@@ -9,7 +9,7 @@
 | Situation | Behavior |
 | --- | --- |
 | Composer **"+"** menu | A **Multi-folder** row in its Commands group — listed whether or not the draft has text; picking it opens the **shell's own option picker** (the same surface behind the model selector) |
-| Picker: add | First row "Add working directory" → native directory picker; **when no native picker can answer (remote / LAN / desktop shell), it falls back to a directory browser this plugin draws** (breadcrumbs back, descend level by level, create a folder inline); re-adding the same path keeps a single entry and says so; add several in a row |
+| Picker: add | First row "Add working directory" → native directory picker; **when no native picker can answer (remote / LAN / desktop shell), it falls back to a directory browser this plugin draws** (breadcrumbs back, descend level by level, create a folder inline, and step past a drive root into "This PC" to switch volumes); re-adding the same path keeps a single entry and says so; add several in a row |
 | Picker: remove | One row per configured directory → a **two-step confirmation** (tick to acknowledge, then Remove; Cancel returns to the list) |
 | Typing **`@`** | Files inside the secondary directories appear as their own group; the picked path is inserted absolute, so the agent can `read` it directly; **directory rows drill with Tab** like the shipped source, with breadcrumbs back up |
 | In a session | The directory list is injected into the system prompt; config changes reach the agent at the next message or tool-call boundary, **without interrupting** |

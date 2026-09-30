@@ -240,7 +240,42 @@ dirStore.set('C:\\levels', [
 ]);
 const level = await api.browse('C:\\levels');
 assert(level.path === 'C:/levels', 'browse canonicalizes the level path to slashes: ' + level.path);
-assert(level.parent === 'C:', 'browse reports the parent for upward navigation');
+// The parent of a level under a drive root must KEEP the trailing slash:
+// 'C:' alone is drive-relative, not absolute, and feeding it back to browse is
+// exactly what used to fail with "requires a fully qualified path".
+assert(level.parent === 'C:/', 'browse reports a fully qualified parent: ' + level.parent);
+// Walking up to the drive root itself must work, and must hand back the volume
+// list as its parent (a drive root has no parent in the tree, so this is the
+// only click path to another drive).
+dirStore.set('C:/', [{ name: 'Users', type: 'directory' }, { name: 'proj', type: 'directory' }]);
+const driveRoot = await api.browse('C:/');
+assert(driveRoot.path === 'C:/', 'browse accepts a drive root: ' + driveRoot.path);
+assert(driveRoot.entries.length === 2, 'drive root lists its children');
+assert(driveRoot.parent === 'this-pc/', 'drive root walks up to the volume list: ' + driveRoot.parent);
+assert(driveRoot.entries.every((e) => e.path.indexOf('//') < 0), 'no doubled separators under a drive root');
+// The volume list only exists on Windows; anything else refuses cleanly.
+if (process.platform === 'win32') {
+  const drives = await api.browse('this-pc/');
+  assert(drives.drives === true, 'the volume list is flagged non-selectable');
+  assert(Array.isArray(drives.entries) && drives.entries.length >= 1, 'drives enumerable on this machine: ' + JSON.stringify(drives.entries.map((d) => d.name)));
+  assert(drives.entries.every((d) => d.drive === true && /^[A-Z]:\/$/.test(d.path)), 'drive entries carry a canonical root path');
+  assert(drives.parent === null, 'the volume list has no parent above it');
+} else {
+  await api.browse('this-pc/').then(
+    () => { throw new Error('FAIL: the volume list should not exist off Windows'); },
+    () => { /* expected rejection */ },
+  );
+}
+// POSIX root handling (platform-independent via the fence-free path logic).
+// The mock resolves by raw string, so seed the trailing-slash spelling too;
+// the real fs.resolve canonicalizes before listDir is reached.
+dirStore.set('C:/levels/', [
+  { name: 'Beta', type: 'directory' },
+  { name: 'alpha', type: 'directory' },
+  { name: '.hidden', type: 'directory' },
+  { name: 'afile.ts', type: 'file' },
+]);
+assert((await api.browse('C:/levels/')).path === 'C:/levels', 'a trailing slash on the request is tolerated');
 assert(level.home === os.homedir().replace(/\\/g, '/'), 'browse carries the home directory');
 assert(level.entries.length === 3, 'browse lists directories only (files dropped): ' + JSON.stringify(level.entries.map((e) => e.name)));
 // localeCompare ordering is locale-dependent (and the browser shows Chinese
