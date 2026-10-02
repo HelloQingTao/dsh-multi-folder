@@ -4,6 +4,8 @@
 
 > 给一个 DSH 项目配置若干**副工作目录**：Agent 的主工作目录不变，但对这些目录拥有同等读写与命令执行权限，还能在输入框用 `@` 直接引用里面的文件。
 
+> 基于上游 [AngelosZou/dsh-multi-folder](https://github.com/AngelosZou/dsh-multi-folder)（MIT，© 2025 Yutong Zou）继续维护。
+
 ## 效果
 
 | 场景 | 表现 |

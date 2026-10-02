@@ -4,6 +4,8 @@
 
 > Secondary working directories for one DSH project: the agent's primary workspace stays put, while configured secondary directories get equal read/write/execute rights and are reachable with `@` in the input.
 
+> Based on [AngelosZou/dsh-multi-folder](https://github.com/AngelosZou/dsh-multi-folder) (MIT, © 2025 Yutong Zou); this repository continues that work.
+
 ## What you get
 
 | Situation | Behavior |
